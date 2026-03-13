@@ -1,23 +1,24 @@
 
-import { GoogleGenAI, Type, Modality, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 
 /**
  * Utility for exponential backoff retries to handle transient RPC/XHR errors.
  */
-async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
+async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
     const errorMsg = error?.message || "";
-    const isQuota = errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED');
+    const isQuota = errorMsg.includes('quota') || errorMsg.includes('429');
     const isTransient = errorMsg.includes('xhr error') || 
                         errorMsg.includes('500') || 
                         errorMsg.includes('UNAVAILABLE') ||
                         isQuota;
 
     if (retries > 0 && isTransient) {
+      // For quota errors, we wait longer to let the bucket refill
       const actualDelay = isQuota ? delay * 4 : delay;
-      console.warn(`Retry logic: ${isQuota ? 'Quota hit' : 'Transient error'}. Waiting ${actualDelay}ms... (Retries left: ${retries})`);
+      console.warn(`Retry logic: ${isQuota ? 'Quota hit' : 'Transient error'}. Waiting ${actualDelay}ms...`);
       await new Promise(resolve => setTimeout(resolve, actualDelay));
       return retry(fn, retries - 1, actualDelay * 1.5);
     }
@@ -26,39 +27,41 @@ async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promis
 }
 
 /**
- * Stage 1: Multimodal Analysis (Metadata only).
- * Separated to allow parallel video generation.
+ * Stage 1 & 2: Multimodal Analysis and Audio Synthesis.
+ * Uses Gemini 3 Flash for robust transcription and translation.
  */
-export const analyzeMediaMetadata = async (
+export const processDubbingPipeline = async (
   fileData: string, 
   mimeType: string,
   targetLang: string
 ) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const cleanData = fileData; 
+  const cleanData = fileData.replace(/\s/g, ''); 
 
   return await retry(async () => {
-    const modelName = 'gemini-3-flash-preview';
-    
+    // 1. Multimodal Analysis using the latest Gemini 3 Flash (High Quota & Performance)
     const analysisResponse = await ai.models.generateContent({
-      model: modelName,
+      model: 'gemini-3-flash-preview',
       contents: [{
         parts: [
           { inlineData: { data: cleanData, mimeType } },
-          { text: `FAST DUB ANALYSIS: 
-                   1. sourceText: Transcription.
-                   2. translatedText: Translation to ${targetLang}.
-                   3. gender: 'male'/'female'.
-                   4. emotion: 'excited'/'sad'/'angry'/'calm'.
-                   5. vocalIdentity: Short description.
-                   6. prosodyInstruction: Pitch/speed notes.
-                   7. confidence: 0.0-1.0.
+          { text: `System: Perform a high-fidelity dubbing analysis. 
+                   Analyze the speech in the provided media and return a JSON object with:
+                   1. sourceText: Full transcription of the original language.
+                   2. translatedText: Context-aware translation into ${targetLang}.
+                   3. gender: 'male' or 'female'.
+                   4. emotion: Primary emotional tone (e.g., 'excited', 'sad', 'angry', 'calm').
+                   5. vocalIdentity: Voice texture description (e.g., 'raspy', 'clear', 'deep').
+                   6. prosodyInstruction: Technical notes for a voice performer to match pitch/speed.
+                   7. confidence: Float (0.0 to 1.0).
+                   8. recommendedVoice: Select the best matching prebuilt voice based on the original speaker's tone and texture. 
+                      - For Male: 'Puck' (youthful), 'Charon' (deep), 'Fenrir' (neutral).
+                      - For Female: 'Kore' (clear/pro), 'Zephyr' (soft/warm).
                    
-                   JSON ONLY.` }
+                   Respond ONLY with valid JSON.` }
         ]
       }],
       config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -69,40 +72,47 @@ export const analyzeMediaMetadata = async (
             emotion: { type: Type.STRING },
             vocalIdentity: { type: Type.STRING },
             prosodyInstruction: { type: Type.STRING },
-            confidence: { type: Type.NUMBER }
+            confidence: { type: Type.NUMBER },
+            recommendedVoice: { type: Type.STRING }
           },
-          required: ["sourceText", "translatedText", "gender", "emotion", "vocalIdentity", "prosodyInstruction", "confidence"]
+          required: ["sourceText", "translatedText", "gender", "emotion", "vocalIdentity", "prosodyInstruction", "confidence", "recommendedVoice"]
         }
       }
     });
 
     const responseText = analysisResponse.text;
     if (!responseText) {
-      throw new Error("Neural model returned an empty response.");
+      throw new Error("Neural model returned an empty response. Please ensure the file has clear speech.");
     }
 
-    return JSON.parse(responseText);
-  });
-};
+    const metadata = JSON.parse(responseText);
+    
+    if (!metadata.sourceText || metadata.sourceText.trim() === "") {
+      throw new Error("Speech detection yielded no results. Please check your audio quality.");
+    }
 
-/**
- * Stage 2: High-fidelity Speech Synthesis.
- * Separated to allow parallel execution.
- */
-export const synthesizeDubbedAudio = async (
-  metadata: any,
-  targetLang: string
-) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Use the neural-recommended voice for better similarity, with a safety check for gender alignment
+    let voiceName = metadata.recommendedVoice;
+    const isFemaleDetected = metadata.gender?.toLowerCase().includes('female');
+    const femaleVoices = ['Kore', 'Zephyr'];
+    const maleVoices = ['Puck', 'Charon', 'Fenrir'];
 
-  return await retry(async () => {
-    const voiceName = (metadata.gender?.toLowerCase().includes('female')) ? 'Kore' : 'Fenrir';
+    // Safety check: Ensure the recommended voice matches the detected gender
+    if (isFemaleDetected && !femaleVoices.includes(voiceName)) {
+      voiceName = 'Kore'; // Default to clear female voice if mismatch
+    } else if (!isFemaleDetected && !maleVoices.includes(voiceName)) {
+      voiceName = 'Fenrir'; // Default to neutral male voice if mismatch
+    }
 
+    // 2. High-fidelity Speech Synthesis
     const synthesisResponse = await ai.models.generateContent({
       model: 'gemini-2.5-flash-preview-tts',
       contents: [{ 
         parts: [{ 
-          text: `PERFORMANCE MODE: Act this dubbed line in ${targetLang} with a ${metadata.emotion} tone, mimicking a ${metadata.vocalIdentity} voice profile: "${metadata.translatedText}"` 
+          text: `PERFORMANCE MODE: Act this dubbed line in ${targetLang} as a ${metadata.gender} speaker. 
+                 Tone: ${metadata.emotion}. 
+                 Voice Profile: ${metadata.vocalIdentity}. 
+                 Line: "${metadata.translatedText}"` 
         }] 
       }],
       config: {
@@ -118,24 +128,11 @@ export const synthesizeDubbedAudio = async (
     const dubbedAudioBase64 = synthesisResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
     
     if (!dubbedAudioBase64) {
-      throw new Error("Neural synthesis failed.");
+      throw new Error("Neural synthesis failed. The model may be overloaded.");
     }
 
-    return dubbedAudioBase64;
+    return { metadata, dubbedAudioBase64 };
   });
-};
-
-/**
- * Legacy Pipeline (kept for compatibility if needed)
- */
-export const processDubbingPipeline = async (
-  fileData: string, 
-  mimeType: string,
-  targetLang: string
-) => {
-  const metadata = await analyzeMediaMetadata(fileData, mimeType, targetLang);
-  const dubbedAudioBase64 = await synthesizeDubbedAudio(metadata, targetLang);
-  return { metadata, dubbedAudioBase64 };
 };
 
 /**
@@ -148,7 +145,7 @@ export const generateDubbedVideo = async (
   targetLang: string
 ) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const cleanFrame = firstFrameBase64;
+  const cleanFrame = firstFrameBase64.replace(/\s/g, '');
 
   return await retry(async () => {
     let operation = await ai.models.generateVideos({
@@ -156,7 +153,7 @@ export const generateDubbedVideo = async (
       prompt: `Cinematic lip-sync video. The speaker's mouth movements perfectly match the ${targetLang} translation: "${translatedText}". Expression: ${emotion}.`,
       image: {
         imageBytes: cleanFrame,
-        mimeType: 'image/jpeg',
+        mimeType: 'image/png',
       },
       config: {
         numberOfVideos: 1,
@@ -186,7 +183,6 @@ export const runComparativeAnalysis = async (
         ]
       }],
       config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -205,19 +201,4 @@ export const runComparativeAnalysis = async (
 export const pollOperation = async (operation: any) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   return await ai.operations.getVideosOperation({ operation });
-};
-
-/**
- * Fetches the video from the Veo download link.
- */
-export const downloadVideoContent = async (downloadLink: string) => {
-  const response = await fetch(downloadLink, {
-    method: 'GET',
-    headers: {
-      'x-goog-api-key': process.env.API_KEY || '',
-    },
-  });
-  if (!response.ok) throw new Error('Failed to download video from neural engine.');
-  const blob = await response.blob();
-  return URL.createObjectURL(blob);
 };

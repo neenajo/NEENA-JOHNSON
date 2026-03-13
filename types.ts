@@ -4,19 +4,7 @@ export enum AppView {
   WORKSPACE = 'WORKSPACE',
   REALTIME = 'REALTIME',
   ANALYSIS = 'ANALYSIS',
-  HISTORY = 'HISTORY'
-}
-
-export interface DubbingProject {
-  id: string;
-  userId: string;
-  sourceVideoUrl?: string;
-  targetLang: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  metadata?: DubbingMetadata;
-  dubbedAudioUrl?: string;
-  dubbedVideoUrl?: string;
-  createdAt: any;
+  METHODOLOGY = 'METHODOLOGY'
 }
 
 export type RealTimeSubView = 'LIVE_METRICS' | 'AUDIO_ANALYSIS' | 'PROCESSING_STATS';
@@ -39,14 +27,5 @@ export interface DubbingMetadata {
   vocalIdentity: string;
   prosodyInstruction: string;
   confidence: number;
-  videoUrl?: string;
-}
-
-declare global {
-  interface Window {
-    aistudio: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
-  }
+  recommendedVoice: string;
 }
