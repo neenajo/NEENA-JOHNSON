@@ -1,30 +1,51 @@
 
 import React, { useState, useEffect } from 'react';
 import { AppView } from '../types';
-import { User } from '../src/firebase';
+import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User } from '../firebase';
 
 interface LayoutProps {
   currentView: AppView;
   setView: (view: AppView) => void;
   isDark: boolean;
-  user: User | null;
-  onLogin: () => void;
-  onLogout: () => void;
   children: React.ReactNode;
 }
 
-const Layout: React.FC<LayoutProps> = ({ currentView, setView, isDark, user, onLogin, onLogout, children }) => {
+const Layout: React.FC<LayoutProps> = ({ currentView, setView, isDark, children }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Login error:", error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setView(AppView.WORKSPACE);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [currentView]);
 
   const navItems = [
-    { id: AppView.HOME, label: 'Overview', icon: '🏠' },
     { id: AppView.WORKSPACE, label: 'Studio Workspace', icon: '🎙️' },
-    { id: AppView.HISTORY, label: 'Project History', icon: '📜' },
+    { id: AppView.HISTORY, label: 'History', icon: '📜' },
     { id: AppView.REALTIME, label: 'Real-Time Plot', icon: '📈' },
     { id: AppView.ANALYSIS, label: 'Analysis Report', icon: '📊' }
   ];
@@ -107,28 +128,19 @@ const Layout: React.FC<LayoutProps> = ({ currentView, setView, isDark, user, onL
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
             {user ? (
-              <div className="flex items-center gap-4">
-                <div className="text-right hidden sm:block">
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Logged in as</div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">{user.displayName || user.email}</div>
+              <div className="flex items-center gap-3">
+                <div className="hidden md:block text-right">
+                  <div className="text-[10px] font-black text-slate-900 dark:text-white uppercase truncate max-w-[100px]">{user.displayName}</div>
+                  <button onClick={handleLogout} className="text-[9px] font-bold text-red-500 uppercase hover:underline">Sign Out</button>
                 </div>
-                <button 
-                  onClick={onLogout}
-                  className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-red-500/10 hover:text-red-500 transition-all text-slate-500"
-                  title="Logout"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                </button>
-                {user.photoURL && (
-                  <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm" referrerPolicy="no-referrer" />
-                )}
+                <img src={user.photoURL || ''} alt="Profile" className="w-10 h-10 rounded-full border border-slate-200 dark:border-slate-800" />
               </div>
             ) : (
               <button 
-                onClick={onLogin}
-                className="px-6 py-2.5 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500 transition-all shadow-lg shadow-red-500/20"
+                onClick={handleLogin}
+                className="bg-red-500 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
               >
                 Sign In
               </button>

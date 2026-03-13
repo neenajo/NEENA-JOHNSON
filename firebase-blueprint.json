@@ -1,52 +1,45 @@
 {
   "entities": {
-    "DubbingProject": {
-      "title": "Dubbing Project",
-      "description": "A project representing a video dubbing and lip-sync task.",
+    "DubbingRecord": {
+      "title": "Dubbing Record",
+      "description": "A record of a completed dubbing operation.",
       "type": "object",
       "properties": {
-        "userId": {
-          "type": "string",
-          "description": "The UID of the user who created the project."
-        },
-        "sourceVideoUrl": {
-          "type": "string",
-          "description": "URL of the original source video."
-        },
-        "targetLang": {
-          "type": "string",
-          "description": "The target language for dubbing."
-        },
-        "status": {
-          "type": "string",
-          "enum": ["pending", "processing", "completed", "error"],
-          "description": "Current status of the dubbing pipeline."
-        },
-        "metadata": {
-          "type": "object",
-          "description": "Neural analysis metadata (source text, translation, emotion, etc.)"
-        },
-        "dubbedAudioUrl": {
-          "type": "string",
-          "description": "URL of the generated dubbed audio."
-        },
-        "dubbedVideoUrl": {
-          "type": "string",
-          "description": "URL of the final lip-synced video."
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp when the project was created."
-        }
+        "uid": { "type": "string", "description": "The user ID of the owner." },
+        "sourceText": { "type": "string" },
+        "translatedText": { "type": "string" },
+        "targetLang": { "type": "string" },
+        "emotion": { "type": "string" },
+        "vocalIdentity": { "type": "string" },
+        "recommendedVoice": { "type": "string" },
+        "confidence": { "type": "number" },
+        "audioUrl": { "type": "string", "description": "URL to the dubbed audio (base64 or storage link)." },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "status", "createdAt"]
+      "required": ["uid", "sourceText", "translatedText", "targetLang", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Basic user information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
     }
   },
   "firestore": {
-    "/projects/{projectId}": {
-      "schema": "DubbingProject",
-      "description": "Collection of dubbing projects."
+    "dubs": {
+      "schema": "DubbingRecord",
+      "description": "Collection of dubbing operations."
+    },
+    "users": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles."
     }
   }
 }

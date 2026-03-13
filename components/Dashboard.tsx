@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { processDubbingPipeline } from '../services/geminiService';
 import { DubbingMetadata } from '../types';
+import { db, auth, collection, addDoc, serverTimestamp, onAuthStateChanged, User } from '../firebase';
 
 interface DashboardProps {
   onComplete: (metadata: DubbingMetadata, audioUrl: string, lang: string) => void;
@@ -18,6 +19,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onComplete, existingResults, exis
   const [resultMetadata, setResultMetadata] = useState<DubbingMetadata | null>(existingResults);
   const [dubbedAudioUrl, setDubbedAudioUrl] = useState<string | null>(existingAudioUrl);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(auth.currentUser);
   
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -26,6 +28,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onComplete, existingResults, exis
     setResultMetadata(existingResults);
     setDubbedAudioUrl(existingAudioUrl);
   }, [existingResults, existingAudioUrl]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -80,6 +89,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onComplete, existingResults, exis
       const base64Data = await fileToBase64(file);
       const response = await processDubbingPipeline(base64Data, file.type, targetLang);
       const audioUrl = response.dubbedAudioBase64 ? createWavUrl(response.dubbedAudioBase64) : '';
+      
+      // Save to Firestore if user is logged in
+      if (auth.currentUser) {
+        try {
+          await addDoc(collection(db, 'dubs'), {
+            uid: auth.currentUser.uid,
+            sourceText: response.metadata.sourceText,
+            translatedText: response.metadata.translatedText,
+            targetLang: targetLang,
+            emotion: response.metadata.emotion,
+            vocalIdentity: response.metadata.vocalIdentity,
+            recommendedVoice: response.metadata.recommendedVoice,
+            confidence: response.metadata.confidence,
+            audioUrl: audioUrl, // In a real app, we'd upload to Storage first
+            createdAt: serverTimestamp()
+          });
+        } catch (fsErr) {
+          console.error("Error saving to Firestore:", fsErr);
+        }
+      }
+
       setResultMetadata(response.metadata);
       setDubbedAudioUrl(audioUrl);
       onComplete(response.metadata, audioUrl, targetLang);
@@ -140,6 +170,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onComplete, existingResults, exis
               <div>
                 <div className="font-black uppercase tracking-widest text-[10px] mb-1">Processing Error</div>
                 {error}
+              </div>
+            </div>
+          )}
+          {!user && (
+            <div className="bg-amber-500/10 border border-amber-500/20 p-6 rounded-2xl text-amber-600 dark:text-amber-500 text-sm font-bold flex items-start gap-4">
+              <span className="mt-0.5">💡</span>
+              <div>
+                <div className="font-black uppercase tracking-widest text-[10px] mb-1">Guest Mode</div>
+                Sign in to save your dubbing history to the database.
               </div>
             </div>
           )}

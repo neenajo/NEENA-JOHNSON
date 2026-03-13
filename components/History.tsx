@@ -1,58 +1,60 @@
-import React, { useState, useEffect } from 'react';
-import { db, auth, collection, query, where, orderBy, onSnapshot, handleFirestoreError, OperationType } from '../src/firebase';
-import { DubbingProject } from '../types';
 
-interface HistoryProps {
-  onSelectProject: (project: DubbingProject) => void;
+import React, { useState, useEffect } from 'react';
+import { db, auth, collection, query, where, orderBy, onSnapshot, onAuthStateChanged, User } from '../firebase';
+import { DubbingMetadata } from '../types';
+
+interface HistoryRecord extends DubbingMetadata {
+  id: string;
+  createdAt: any;
+  targetLang: string;
+  audioUrl: string;
 }
 
-const History: React.FC<HistoryProps> = ({ onSelectProject }) => {
-  const [projects, setProjects] = useState<DubbingProject[]>([]);
+const History: React.FC = () => {
+  const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(auth.currentUser);
 
   useEffect(() => {
-    if (!auth.currentUser) {
-      setLoading(false);
-      return;
-    }
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (!u) {
+        setRecords([]);
+        setLoading(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
     const q = query(
-      collection(db, 'projects'),
-      where('userId', '==', auth.currentUser.uid),
+      collection(db, 'dubs'),
+      where('uid', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const projs: DubbingProject[] = [];
-      snapshot.forEach((doc) => {
-        projs.push({ id: doc.id, ...doc.data() } as DubbingProject);
-      });
-      setProjects(projs);
+      const docs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as HistoryRecord[];
+      setRecords(docs);
       setLoading(false);
-    }, (err) => {
-      console.error("Firestore Snapshot Error:", err);
-      setError("Failed to load project history. Please check your permissions.");
+    }, (error) => {
+      console.error("History fetch error:", error);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
-
-  if (!auth.currentUser) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] text-center space-y-6">
-        <div className="text-6xl opacity-20">🔒</div>
-        <h2 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Authentication Required</h2>
-        <p className="text-slate-500 dark:text-slate-400 max-w-md">Please sign in to view your project history and save your neural dubbing results.</p>
-      </div>
-    );
-  }
+  }, [user]);
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500"></div>
+        <div className="animate-spin text-4xl">🌀</div>
       </div>
     );
   }
@@ -60,60 +62,43 @@ const History: React.FC<HistoryProps> = ({ onSelectProject }) => {
   return (
     <div className="animate-fadeIn">
       <div className="mb-12">
-        <h1 className="text-4xl font-black tracking-tight text-slate-900 dark:text-white uppercase mb-4">Project History</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-base font-medium">Your previous neural dubbing and lip-sync projects.</p>
+        <h1 className="text-4xl font-black tracking-tight text-slate-900 dark:text-white uppercase mb-4">Dubbing History</h1>
+        <p className="text-slate-500 dark:text-slate-400 text-base font-medium">Your previous neural dubbing operations.</p>
       </div>
 
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/20 p-6 rounded-2xl text-red-500 text-sm font-bold mb-8">
-          {error}
-        </div>
-      )}
-
-      {projects.length === 0 ? (
-        <div className="border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem] p-20 text-center space-y-4">
-          <div className="text-4xl opacity-20">📜</div>
-          <div className="text-slate-400 dark:text-slate-600 font-bold uppercase tracking-widest text-xs">No projects found yet</div>
-          <p className="text-slate-500 text-sm">Start a new dubbing project in the workspace to see it here.</p>
+      {records.length === 0 ? (
+        <div className="bg-white dark:bg-[#11141d] border border-slate-200 dark:border-slate-800 rounded-3xl p-20 text-center">
+          <div className="text-4xl mb-4">📭</div>
+          <div className="text-slate-500 font-bold uppercase tracking-widest text-sm">No records found yet</div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {projects.map((project) => (
-            <div 
-              key={project.id}
-              onClick={() => project.status === 'completed' && onSelectProject(project)}
-              className={`bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-slate-800/60 rounded-3xl p-6 shadow-sm hover:shadow-xl hover:border-red-500/30 transition-all cursor-pointer group flex flex-col h-full ${project.status !== 'completed' ? 'opacity-60 grayscale' : ''}`}
-            >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {records.map(record => (
+            <div key={record.id} className="bg-white dark:bg-[#11141d] border border-slate-200 dark:border-slate-800 rounded-3xl p-8 hover:border-red-500/30 transition-all group">
               <div className="flex justify-between items-start mb-6">
-                <div className="bg-slate-50 dark:bg-[#1c2128] px-3 py-1 rounded-full text-[10px] font-black text-slate-500 uppercase tracking-widest border border-slate-200 dark:border-slate-700">
-                  {project.targetLang}
+                <div>
+                  <div className="text-[10px] text-red-500 font-black uppercase tracking-widest mb-1">{record.targetLang}</div>
+                  <div className="text-lg font-bold text-slate-900 dark:text-white truncate max-w-[200px]">{record.sourceText}</div>
                 </div>
-                <div className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
-                  project.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' :
-                  project.status === 'processing' ? 'bg-amber-500/10 text-amber-500 animate-pulse' :
-                  'bg-red-500/10 text-red-500'
-                }`}>
-                  {project.status}
+                <div className="text-[10px] text-slate-400 font-bold">
+                  {record.createdAt?.toDate ? record.createdAt.toDate().toLocaleDateString() : 'Recent'}
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="bg-slate-50 dark:bg-[#0d1117] p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <div className="text-[9px] text-slate-500 uppercase font-black tracking-widest">Emotion</div>
+                  <div className="text-sm font-bold text-slate-900 dark:text-white capitalize">{record.emotion}</div>
+                </div>
+                <div className="bg-slate-50 dark:bg-[#0d1117] p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <div className="text-[9px] text-slate-500 uppercase font-black tracking-widest">Voice</div>
+                  <div className="text-sm font-bold text-slate-900 dark:text-white">{record.recommendedVoice}</div>
                 </div>
               </div>
 
-              <div className="flex-1 space-y-4">
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white line-clamp-2">
-                  {project.metadata?.sourceText || 'Untitled Project'}
-                </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 italic line-clamp-2">
-                  "{project.metadata?.translatedText || 'Processing translation...'}"
-                </p>
-              </div>
-
-              <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  {project.createdAt?.toDate().toLocaleDateString()}
-                </div>
-                <div className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-                </div>
-              </div>
+              {record.audioUrl && (
+                <audio controls src={record.audioUrl} className="w-full h-8 filter dark:invert opacity-60 group-hover:opacity-100 transition-opacity" />
+              )}
             </div>
           ))}
         </div>
