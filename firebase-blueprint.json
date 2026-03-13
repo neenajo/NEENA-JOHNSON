@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "DubbingProject": {
+      "title": "Dubbing Project",
+      "description": "A project representing a video dubbing and lip-sync task.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who created the project."
+        },
+        "sourceVideoUrl": {
+          "type": "string",
+          "description": "URL of the original source video."
+        },
+        "targetLang": {
+          "type": "string",
+          "description": "The target language for dubbing."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "processing", "completed", "error"],
+          "description": "Current status of the dubbing pipeline."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Neural analysis metadata (source text, translation, emotion, etc.)"
+        },
+        "dubbedAudioUrl": {
+          "type": "string",
+          "description": "URL of the generated dubbed audio."
+        },
+        "dubbedVideoUrl": {
+          "type": "string",
+          "description": "URL of the final lip-synced video."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the project was created."
+        }
+      },
+      "required": ["userId", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": "DubbingProject",
+      "description": "Collection of dubbing projects."
+    }
+  }
+}

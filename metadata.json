@@ -1,0 +1,8 @@
+{
+  "name": "EmoDub: Real-Time Expressive Dubbing Engine",
+  "description": "A high-fidelity framework for emotion-preserving cross-lingual dubbing with voice identity retention and lip-sync synchronization.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

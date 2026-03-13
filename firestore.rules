@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: projects
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, immutable) - Owner of the project
+    //   - sourceVideoUrl: string (optional) - URL of source video
+    //   - targetLang: string (optional) - Target language
+    //   - status: string (required) - pending, processing, completed, error
+    //   - metadata: map (optional) - Neural analysis results
+    //   - dubbedAudioUrl: string (optional) - Result audio
+    //   - dubbedVideoUrl: string (optional) - Result video
+    //   - createdAt: timestamp (required, immutable) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "neenajohnson@karunya.edu.in" && request.auth.token.email_verified == true);
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['userId', 'status', 'createdAt']) &&
+             data.userId is string &&
+             data.status in ['pending', 'processing', 'completed', 'error'] &&
+             data.createdAt is timestamp &&
+             (!('sourceVideoUrl' in data) || data.sourceVideoUrl is string) &&
+             (!('targetLang' in data) || data.targetLang is string) &&
+             (!('metadata' in data) || data.metadata is map);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /projects/{projectId} {
+      // Users can only read their own projects
+      allow read: if isDocOwner() || isAdmin();
+      
+      // Users can create projects for themselves
+      allow create: if isAuthenticated() && 
+                      isValidProject(request.resource.data) && 
+                      request.resource.data.userId == request.auth.uid;
+      
+      // Users can update their own projects, but cannot change ownership or createdAt
+      allow update: if isDocOwner() && 
+                      isValidProject(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      
+      // Users can delete their own projects
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
